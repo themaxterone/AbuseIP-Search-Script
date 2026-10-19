@@ -24,6 +24,16 @@ CATEGORIES = {
     22: "SSH", 23: "IoT Targeted"
 }
 
+def print_progress(iteration, total, prefix="Progress", length=30):
+    """Renders a dynamic percentage progress bar on a single line."""
+    percent = ("{0:.1f}").format(100 * (iteration / float(total)))
+    filled_length = int(length * iteration // total)
+    bar = "█" * filled_length + "-" * (length - filled_length)
+    sys.stdout.write(f"\r{prefix} |{bar}| {percent}% ({iteration}/{total})")
+    sys.stdout.flush()
+    if iteration == total:
+        sys.stdout.write("\n")
+
 def create_progress_bar(score, length=30):
     """Generates an ANSI color-coded visual progress bar for terminal output."""
     filled_length = int(length * score // 100)
@@ -53,21 +63,19 @@ def query_abuseipdb(ip, api_key):
     }
 
     try:
-        # verify=False prevents SSL failures behind corporate proxies / firewalls
         response = requests.get(url, headers=headers, params=params, timeout=15, verify=False)
         if response.status_code == 401:
-            print("\033[91m[!] Error: Invalid AbuseIPDB API key.\033[0m")
+            print("\n\033[91m[!] Error: Invalid AbuseIPDB API key.\033[0m")
             sys.exit(1)
         elif response.status_code == 429:
-            print("\033[91m[!] Rate limit reached for AbuseIPDB API (HTTP 429).\033[0m")
+            print("\n\033[91m[!] Rate limit reached for AbuseIPDB API (HTTP 429).\033[0m")
             return None
         response.raise_for_status()
         data = response.json().get("data", {})
     except requests.exceptions.RequestException as e:
-        print(f"\033[91m[!] Connection error while checking {ip}: {e}\033[0m")
+        print(f"\n\033[91m[!] Connection error while checking {ip}: {e}\033[0m")
         return None
 
-    # Parse categories reported
     reported_categories = set()
     for report in data.get("reports", []):
         for cat in report.get("categories", []):
@@ -138,7 +146,6 @@ def export_html_report(filename, results):
             risk_label = "Clean"
             bar_color = "#16a34a"
 
-        # Categories badges
         if r["categories"]:
             cats_badges = "".join([f'<span class="category-tag">{html.escape(c)}</span>' for c in r["categories"]])
         else:
@@ -436,6 +443,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-i", "--ip", help="Single target IP address to query")
     group.add_argument("-f", "--file", help="Path to text file containing IP addresses to query in bulk")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose terminal output (show detailed IP breakdown)")
     args = parser.parse_args()
 
     if API_KEY == "YOUR_API_KEY_HERE":
@@ -454,17 +462,38 @@ def main():
             print(f"\033[93m[!] No valid IPv4 addresses found in '{args.file}'.\033[0m")
             sys.exit(0)
 
-        print(f"\n[+] Extracted {len(ips)} unique IP address(es) from '{args.file}'.")
+        total_ips = len(ips)
+        print(f"\n[+] Extracted {total_ips} unique IP address(es) from '{args.file}'.")
         print("[+] Starting queries against AbuseIPDB...\n")
 
         results = []
         for idx, ip in enumerate(ips, start=1):
-            print(f"[{idx}/{len(ips)}] Checking IP: {ip}...")
+            if not args.verbose:
+                print_progress(idx, total_ips, prefix="[+] Checking AbuseIPDB")
+            else:
+                print(f"[{idx}/{total_ips}] Checking IP: {ip}...")
+
             res = query_abuseipdb(ip, API_KEY)
             if res:
                 results.append(res)
-                print_result_terminal(res)
+                if args.verbose:
+                    print_result_terminal(res)
+
             time.sleep(0.3)
+
+        # Print final statistical summary
+        malicious = sum(1 for r in results if r["score"] >= 60)
+        suspicious = sum(1 for r in results if 20 <= r["score"] < 60)
+        clean = sum(1 for r in results if r["score"] < 20)
+
+        print("\n" + "=" * 65)
+        print(f" ABUSEIPDB BULK SUMMARY | TOTAL UNIQUE IPs: {total_ips}")
+        print("=" * 65)
+        print(f" Total Checked : {len(results)}")
+        print(f" Malicious     : \033[91m{malicious}\033[0m (Score >= 60%)")
+        print(f" Suspicious    : \033[93m{suspicious}\033[0m (Score 20-59%)")
+        print(f" Clean         : \033[92m{clean}\033[0m (Score < 20%)")
+        print("=" * 65)
 
         # Generate HTML report
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
