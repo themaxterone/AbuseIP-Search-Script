@@ -42,7 +42,7 @@ def create_progress_bar(score, length=30):
 
 def query_abuseipdb(ip, api_key):
     """Queries AbuseIPDB v2 endpoint for a single IP address."""
-    url = "[https://api.abuseipdb.com/api/v2/check](https://api.abuseipdb.com/api/v2/check)"
+    url = "https://api.abuseipdb.com/api/v2/check"
     headers = {
         "Accept": "application/json",
         "Key": api_key
